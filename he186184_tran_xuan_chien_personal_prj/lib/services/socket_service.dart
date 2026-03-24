@@ -17,7 +17,7 @@ class SocketService {
 
   // IP của PC làm máy chủ
   static String get defaultServerUrl {
-    return 'http://192.168.1.220:3000';
+    return 'http://10.33.71.183:3000';
   }
 
   void connect({String? url, required Function onConnect, required Function onConnectError}) {

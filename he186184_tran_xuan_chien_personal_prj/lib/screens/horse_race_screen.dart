@@ -38,6 +38,10 @@ class _HorseRaceScreenState extends State<HorseRaceScreen> with SingleTickerProv
   bool _isRacing = false;
   bool _raceFinished = false;
 
+  int _totalPot = 0;
+  bool _hasBet = false;
+  List<dynamic> _roomPlayers = [];
+
   List<int> _finishOrder = [];
   final double _finishLine = 5000.0;
 
@@ -90,6 +94,14 @@ class _HorseRaceScreenState extends State<HorseRaceScreen> with SingleTickerProv
             _resetRaceLocally();
          }
       });
+      _socketService.onEvent('update_pot', (data) {
+        if (mounted) {
+          setState(() {
+            _totalPot = data['totalPot'] ?? 0;
+            _roomPlayers = data['players'] ?? [];
+          });
+        }
+      });
     }
   }
 
@@ -99,6 +111,7 @@ class _HorseRaceScreenState extends State<HorseRaceScreen> with SingleTickerProv
       _socketService.offEvent('start_countdown');
       _socketService.offEvent('finish_race');
       _socketService.offEvent('reset_race');
+      _socketService.offEvent('update_pot');
     }
     _ticker.dispose();
     _scrollController.dispose();
@@ -119,6 +132,8 @@ class _HorseRaceScreenState extends State<HorseRaceScreen> with SingleTickerProv
     if (_scrollController.hasClients) _scrollController.jumpTo(0);
     setState(() {
       _raceFinished = false;
+      _hasBet = false;
+      if (widget.roomId == null) _totalPot = 0;
     });
   }
 
@@ -129,8 +144,27 @@ class _HorseRaceScreenState extends State<HorseRaceScreen> with SingleTickerProv
     _resetRaceLocally();
   }
 
+  void _placeBet() {
+    if (_diamonds < _betAmount || _isRacing || _hasBet) return;
+    setState(() {
+      _diamonds -= _betAmount;
+      _hasBet = true;
+    });
+    if (widget.roomId != null) {
+      _socketService.emitEvent('place_bet', {
+        'roomId': widget.roomId,
+        'betAmount': _betAmount,
+        'horseIndex': _selectedHorse
+      });
+    } else {
+      setState(() {
+        _totalPot = _betAmount;
+      });
+    }
+  }
+
   Future<void> _startRace() async {
-    if (_isRacing || _diamonds < _betAmount) return;
+    if (_isRacing) return;
     
     // Only host can start multiplayer race if in room
     if (widget.roomId != null && !_isHost) return;
@@ -145,7 +179,6 @@ class _HorseRaceScreenState extends State<HorseRaceScreen> with SingleTickerProv
   Future<void> _executeStartSequence() async {
 
     setState(() {
-      _diamonds -= _betAmount;
       _isRacing = true;
       _raceFinished = false;
       _showCountdown = true;
@@ -221,27 +254,70 @@ class _HorseRaceScreenState extends State<HorseRaceScreen> with SingleTickerProv
 
   void _finishRaceLocally() {
     _ticker.stop();
-    int rank = _finishOrder.indexOf(_selectedHorse) + 1;
     int winAmount = 0;
+    int rank = _finishOrder.indexOf(_selectedHorse) + 1;
+    String title = "";
+    String subtitle = "";
 
-    if (rank == 1) winAmount = (_betAmount * 3).toInt();
-    else if (rank == 2) winAmount = (_betAmount * 2).toInt();
-    else if (rank == 3) winAmount = (_betAmount * 1.5).toInt();
+    if (widget.roomId != null) {
+      List<int> bettedHorses = [];
+      for (var p in _roomPlayers) {
+        if (p['selectedHorse'] != null) {
+          bettedHorses.add(p['selectedHorse'] as int);
+        }
+      }
+      int bestRank = 999;
+      int winningHorse = -1;
+      for (int horse in bettedHorses) {
+        int r = _finishOrder.indexOf(horse) + 1;
+        if (r > 0 && r < bestRank) {
+          bestRank = r;
+          winningHorse = horse;
+        }
+      }
+      if (winningHorse == -1) {
+        title = "HÒA";
+        subtitle = "Không ai đặt cược!";
+      } else {
+        bool isWinner = (_selectedHorse == winningHorse);
+        int totalBetOnWinningHorse = 0;
+        for (var p in _roomPlayers) {
+          if (p['selectedHorse'] == winningHorse && p['betAmount'] != null) {
+            totalBetOnWinningHorse += (p['betAmount'] as num).toInt();
+          }
+        }
+
+        if (isWinner && totalBetOnWinningHorse > 0) {
+          double proportion = min(1.0, _betAmount / totalBetOnWinningHorse);
+          winAmount = (_totalPot * proportion).toInt();
+          title = "CHIẾN THẮNG! 🏆";
+          subtitle = "Ngựa số ${winningHorse + 1} có hạng cao nhất trong phòng ($bestRank)\nBạn ăn ${(proportion * 100).toInt()}% Hũ theo tỷ lệ cược";
+        } else {
+          title = "THUA CUỘC 💀";
+          subtitle = "Ngựa số ${winningHorse + 1} thắng vì có hạng cao nhất phòng ($bestRank)";
+        }
+      }
+    } else {
+      if (rank == 1) winAmount = (_betAmount * 3).toInt();
+      else if (rank == 2) winAmount = (_betAmount * 2).toInt();
+      else if (rank == 3) winAmount = (_betAmount * 1.5).toInt();
+      title = rank <= 3 ? "CHIẾN THẮNG! 🏆" : "THUA CUỘC 💀";
+      subtitle = "Ngựa của bạn đứng hạng: $rank";
+    }
 
     setState(() {
       _diamonds += winAmount;
       _isRacing = false;
       _raceFinished = true;
       if (_diamonds <= 0) {
-        _betAmount = 0; // Hết tiền thì cược về 0
+        _betAmount = 0;
       } else if (_betAmount > _diamonds) {
         _betAmount = _diamonds >= 10 ? 10 : _diamonds;
       }
-      // Đảm bảo cược tối thiểu là 10 nếu vẫn còn tiền
       if (_diamonds >= 10 && _betAmount < 10) _betAmount = 10;
     });
 
-    _showResultDialog(rank, winAmount);
+    _showResultDialog(title, subtitle, winAmount);
 
     final record = RaceRecord(
       date: DateTime.now(),
@@ -253,18 +329,18 @@ class _HorseRaceScreenState extends State<HorseRaceScreen> with SingleTickerProv
     context.read<RaceHistoryProvider>().addRecord(record);
   }
 
-  void _showResultDialog(int rank, int win) {
+  void _showResultDialog(String title, String subtitle, int win) {
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
         backgroundColor: Colors.blueGrey.shade900,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Center(child: Text(rank <= 3 ? "CHIẾN THẮNG! 🏆" : "THUA CUỘC 💀", style: const TextStyle(color: Colors.yellowAccent, fontWeight: FontWeight.bold, shadows: [Shadow(color: Colors.black, blurRadius: 2, offset: Offset(1,1))]))),
+        title: Center(child: Text(title, style: const TextStyle(color: Colors.yellowAccent, fontWeight: FontWeight.bold, shadows: [Shadow(color: Colors.black, blurRadius: 2, offset: Offset(1,1))]))),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text("Ngựa của bạn đứng hạng: $rank", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, shadows: [Shadow(color: Colors.black, blurRadius: 2, offset: Offset(1,1))])),
+            Text(subtitle, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, shadows: [Shadow(color: Colors.black, blurRadius: 2, offset: Offset(1,1))])),
             const SizedBox(height: 10),
             Text(win > 0 ? "+ $win 🧧" : "- $_betAmount 🧧",
                 style: TextStyle(color: win > 0 ? Colors.greenAccent : Colors.redAccent, fontSize: 24, fontWeight: FontWeight.bold, shadows: const [Shadow(color: Colors.black, blurRadius: 2, offset: Offset(1,1))])),
@@ -364,10 +440,21 @@ class _HorseRaceScreenState extends State<HorseRaceScreen> with SingleTickerProv
           // UI TRẠNG THÁI
           Positioned(
             top: 20, right: 20,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
-              decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.cyanAccent)),
-              child: Text("🧧 $_diamonds", style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold, shadows: [Shadow(blurRadius: 2, color: Colors.black, offset: Offset(1, 1))])),
+            child: Row(
+              children: [
+                if (_totalPot > 0)
+                  Container(
+                    margin: const EdgeInsets.only(right: 15),
+                    padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
+                    decoration: BoxDecoration(color: Colors.red.shade900.withOpacity(0.8), borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.yellowAccent)),
+                    child: Text("💰 HŨ: $_totalPot", style: const TextStyle(color: Colors.yellowAccent, fontSize: 20, fontWeight: FontWeight.bold, shadows: [Shadow(blurRadius: 2, color: Colors.black, offset: Offset(1, 1))])),
+                  ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
+                  decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.cyanAccent)),
+                  child: Text("🧧 $_diamonds", style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold, shadows: [Shadow(blurRadius: 2, color: Colors.black, offset: Offset(1, 1))])),
+                ),
+              ],
             ),
           ),
 
@@ -441,9 +528,9 @@ class _HorseRaceScreenState extends State<HorseRaceScreen> with SingleTickerProv
 
             Expanded(
               child: Opacity(
-                opacity: hasMoney ? 1.0 : 0.3, // Làm mờ thanh cược khi hết tiền
+                opacity: hasMoney && !_hasBet && !_isRacing ? 1.0 : 0.5,
                 child: IgnorePointer(
-                  ignoring: !hasMoney, // Chặn hoàn toàn tương tác khi hết tiền
+                  ignoring: !hasMoney || _hasBet || _isRacing,
                   child: SliderTheme(
                     data: SliderThemeData(
                       trackHeight: 6,
@@ -460,7 +547,7 @@ class _HorseRaceScreenState extends State<HorseRaceScreen> with SingleTickerProv
                         // Logic max an toàn để không bao giờ bị lỗi min <= max
                         max: _diamonds > 0 ? _diamonds.toDouble() : 10,
                         onChanged: (val) {
-                          if (hasMoney) setState(() => _betAmount = val.toInt());
+                          if (hasMoney && !_hasBet && !_isRacing) setState(() => _betAmount = val.toInt());
                         },
                       ),
                     ),
@@ -521,7 +608,9 @@ class _HorseRaceScreenState extends State<HorseRaceScreen> with SingleTickerProv
           const Text("ĐẶT CỬA:", style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold, shadows: [Shadow(blurRadius: 2, color: Colors.black, offset: Offset(1, 1))])),
           for (int i = 0; i < _horseCount; i++)
             GestureDetector(
-              onTap: () => setState(() => _selectedHorse = i),
+              onTap: () {
+                if (!_hasBet && !_isRacing) setState(() => _selectedHorse = i);
+              },
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 200),
                 padding: const EdgeInsets.all(8),
@@ -534,15 +623,24 @@ class _HorseRaceScreenState extends State<HorseRaceScreen> with SingleTickerProv
               ),
             ),
           const SizedBox(width: 5),
-          ElevatedButton(
-            onPressed: _startRace,
-            style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
-                shape: const StadiumBorder(),
-                padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 12)
+          if (_hasBet && !_isHost)
+            const Text("Đang chờ Host bắt đầu...", style: TextStyle(color: Colors.yellowAccent, fontWeight: FontWeight.bold, fontStyle: FontStyle.italic, shadows: [Shadow(blurRadius: 2, color: Colors.black, offset: Offset(1, 1))]))
+          else
+            ElevatedButton(
+              onPressed: () {
+                 if (!_hasBet) _placeBet();
+                 else if (_isHost) _startRace();
+              },
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red,
+                  shape: const StadiumBorder(),
+                  padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 12)
+              ),
+              child: Text(
+                 !_hasBet ? "ĐẶT CƯỢC" : "CHẠY",
+                 style: const TextStyle(fontWeight: FontWeight.bold, shadows: [Shadow(blurRadius: 2, color: Colors.black, offset: Offset(1, 1))])
+              ),
             ),
-            child: const Text("CHẠY", style: TextStyle(fontWeight: FontWeight.bold, shadows: [Shadow(blurRadius: 2, color: Colors.black, offset: Offset(1, 1))])),
-          ),
         ],
       ),
     );

@@ -257,7 +257,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
             const SizedBox(height: 15),
             _buildTextField("Mã phòng (VD: 9999)", _roomIdController, Icons.meeting_room),
             const SizedBox(height: 15),
-            _buildTextField("IP (Nhấn vào thẳng = 192.168.1.220)", _ipController, Icons.wifi),
+            _buildTextField("IP (VD: 192.168.1.1)", _ipController, Icons.wifi),
             const SizedBox(height: 30),
 
             _isLoading
