@@ -120,7 +120,7 @@ class _HorseRaceScreenState extends State<HorseRaceScreen> with SingleTickerProv
     super.dispose();
   }
 
-  void _resetRaceLocally() {
+  void _resetHorses() {
     _weather = WeatherType
         .values[_rng.nextInt(WeatherType.values.length)];
     for (var n in _horseNotifiers) n.value = 0.0;
@@ -130,6 +130,10 @@ class _HorseRaceScreenState extends State<HorseRaceScreen> with SingleTickerProv
     }
     _finishOrder = [];
     if (_scrollController.hasClients) _scrollController.jumpTo(0);
+  }
+
+  void _resetRaceLocally() {
+    _resetHorses();
     setState(() {
       _raceFinished = false;
       _hasBet = false;
@@ -184,7 +188,7 @@ class _HorseRaceScreenState extends State<HorseRaceScreen> with SingleTickerProv
       _showCountdown = true;
     });
 
-    _resetRaceLocally();
+    _resetHorses();
 
     List<String> seq = ["3", "2", "1", "CHẠY!"];
     for (var s in seq) {
@@ -287,7 +291,10 @@ class _HorseRaceScreenState extends State<HorseRaceScreen> with SingleTickerProv
           }
         }
 
-        if (isWinner && totalBetOnWinningHorse > 0) {
+        if (!_hasBet) {
+          title = "QUAN SÁT 🏇";
+          subtitle = "Ngựa số ${winningHorse + 1} hạng cao nhất ($bestRank)";
+        } else if (isWinner && totalBetOnWinningHorse > 0) {
           double proportion = min(1.0, _betAmount / totalBetOnWinningHorse);
           winAmount = (_totalPot * proportion).toInt();
           title = "CHIẾN THẮNG! 🏆";
@@ -342,8 +349,8 @@ class _HorseRaceScreenState extends State<HorseRaceScreen> with SingleTickerProv
           children: [
             Text(subtitle, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, shadows: [Shadow(color: Colors.black, blurRadius: 2, offset: Offset(1,1))])),
             const SizedBox(height: 10),
-            Text(win > 0 ? "+ $win 🧧" : "- $_betAmount 🧧",
-                style: TextStyle(color: win > 0 ? Colors.greenAccent : Colors.redAccent, fontSize: 24, fontWeight: FontWeight.bold, shadows: const [Shadow(color: Colors.black, blurRadius: 2, offset: Offset(1,1))])),
+            Text(win > 0 ? "+ $win 🧧" : (_hasBet ? "- $_betAmount 🧧" : "0 🧧"),
+                style: TextStyle(color: win > 0 ? Colors.greenAccent : (_hasBet ? Colors.redAccent : Colors.grey), fontSize: 24, fontWeight: FontWeight.bold, shadows: const [Shadow(color: Colors.black, blurRadius: 2, offset: Offset(1,1))])),
           ],
         ),
         actions: [Center(child: TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("TIẾP TỤC", style: TextStyle(fontWeight: FontWeight.bold, shadows: [Shadow(color: Colors.black, blurRadius: 2, offset: Offset(1,1))]))))],
@@ -442,13 +449,12 @@ class _HorseRaceScreenState extends State<HorseRaceScreen> with SingleTickerProv
             top: 20, right: 20,
             child: Row(
               children: [
-                if (_totalPot > 0)
-                  Container(
-                    margin: const EdgeInsets.only(right: 15),
-                    padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
-                    decoration: BoxDecoration(color: Colors.red.shade900.withOpacity(0.8), borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.yellowAccent)),
-                    child: Text("💰 HŨ: $_totalPot", style: const TextStyle(color: Colors.yellowAccent, fontSize: 20, fontWeight: FontWeight.bold, shadows: [Shadow(blurRadius: 2, color: Colors.black, offset: Offset(1, 1))])),
-                  ),
+                Container(
+                  margin: const EdgeInsets.only(right: 15),
+                  padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
+                  decoration: BoxDecoration(color: Colors.red.shade900.withOpacity(0.8), borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.yellowAccent)),
+                  child: Text("💰 HŨ: $_totalPot", style: const TextStyle(color: Colors.yellowAccent, fontSize: 20, fontWeight: FontWeight.bold, shadows: [Shadow(blurRadius: 2, color: Colors.black, offset: Offset(1, 1))])),
+                ),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
                   decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.cyanAccent)),
