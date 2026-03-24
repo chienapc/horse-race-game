@@ -28,7 +28,7 @@ io.on("connection", (socket) => {
     socket.join(roomId);
 
     // Thêm người chơi vào danh sách của phòng
-    const newUser = { id: socket.id, name: nickname, isHost: rooms[roomId].length === 0 };
+    const newUser = { id: socket.id, name: nickname, isHost: rooms[roomId].length === 0, betAmount: 0, selectedHorse: null };
     rooms[roomId].push(newUser);
 
     console.log(`${nickname} đã vào phòng ${roomId} với vai trò ${newUser.isHost ? 'Host' : 'Client'}`);
@@ -54,7 +54,33 @@ io.on("connection", (socket) => {
   });
 
   socket.on("reset_race", (data) => {
+    const room = rooms[data.roomId];
+    if (room) {
+      room.pot = 0;
+      room.forEach(u => {
+        u.betAmount = 0;
+        u.selectedHorse = null;
+      });
+      io.to(data.roomId).emit("update_pot", { totalPot: 0, players: room });
+    }
     io.to(data.roomId).emit("reset_race", data);
+  });
+
+  socket.on("place_bet", (data) => {
+    const { roomId, betAmount, horseIndex } = data;
+    if (rooms[roomId]) {
+      const room = rooms[roomId];
+      if (typeof room.pot === 'undefined') room.pot = 0;
+      room.pot += betAmount;
+
+      const user = room.find(u => u.id === socket.id);
+      if (user) {
+        user.betAmount = betAmount;
+        user.selectedHorse = horseIndex;
+      }
+
+      io.to(roomId).emit("update_pot", { totalPot: room.pot, players: room });
+    }
   });
 
   socket.on("start_session", (data) => {
